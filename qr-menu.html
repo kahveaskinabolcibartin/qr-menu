@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>QR Menü</title>
+<style>
+  :root{--radius:8px;}
+  body { font-family: Arial, sans-serif; margin:0; background:#fafafa; color:#111; }
+  /* Sticky üst kısım */
+  header { position:sticky; top:0; z-index:1000; background:#fff; border-bottom:1px solid #e6e6e6; display:flex; flex-direction:column; align-items:center; }
+  .logo-wrap{ padding:10px 12px; }
+  .logo-wrap img{ height:52px; max-width:92vw; object-fit:contain; cursor:pointer; display:block; margin:0 auto; }
+  .major-groups { display:flex; gap:10px; flex-wrap:wrap; justify-content:center; padding:8px 10px 12px; }
+  .major-groups button {
+    padding:12px 20px; border:none; border-radius:var(--radius);
+    background:#efefef; cursor:pointer; font-size:18px; display:flex; align-items:center; gap:10px;
+    box-shadow:0 1px 0 rgba(0,0,0,.04) inset;
+  }
+  .major-groups button.active { background:#111; color:#fff; }
+  /* Ana ekran restoran seçimi */
+  .rest-select { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; gap:20px; padding:24px; }
+  .rest-buttons { display:flex; gap:10px; width:100%; max-width:560px; }
+  .rest-buttons button { flex:1; padding:20px 16px; font-size:18px; border:none; border-radius:var(--radius); background:#222; color:#fff; cursor:pointer; }
+  /* İçerik alanı */
+  .container { display:flex; gap:0; min-height:calc(100vh - 120px); }
+  .family-groups { width:26%; max-width:220px; background:#fff; border-right:1px solid #e6e6e6; }
+  .family-groups button{ display:block; width:100%; padding:12px 14px; border:none; background:#fff; text-align:left; cursor:pointer; border-bottom:1px solid #f1f1f1; font-size:15px; }
+  .family-groups button:hover, .family-groups button.active{ background:#f6f6f6; }
+  .menu-items { flex:1; padding:12px; }
+  .menu-card { display:flex; gap:10px; background:#fff; border-radius:var(--radius); border:1px solid #e6e6e6; margin-bottom:12px; padding:10px; align-items:center; }
+  .menu-card img { width:80px; height:80px; object-fit:cover; border-radius:6px; flex:0 0 auto; background:#f3f3f3; }
+  .menu-info { flex:1; min-width:0; }
+  .menu-info h4 { margin:0; font-size:16px; display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .menu-info h4 span.price{ white-space:nowrap; font-weight:600; }
+  .menu-info p { margin:6px 0 0; font-size:13px; color:#666; line-height:1.35; }
+  @media (max-width: 860px){
+    .container{ flex-direction:column; }
+    .family-groups{ width:100%; max-width:none; display:flex; overflow-x:auto; border-right:none; border-bottom:1px solid #e6e6e6; }
+    .family-groups button{ flex:1; border-bottom:none; border-right:1px solid #f1f1f1; white-space:nowrap; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Başlangıç ekranı -->
+<div id="start-screen" class="rest-select">
+  <h2>Restoran Seçiniz</h2>
+  <div id="restaurantButtons" class="rest-buttons"></div>
+</div>
+
+<!-- Menü ekranı -->
+<div id="menu-screen" style="display:none;">
+  <header>
+    <div class="logo-wrap">
+      <img id="logoImg" alt="Logo" referrerpolicy="no-referrer" />
+    </div>
+    <div class="major-groups" id="majorGroups"></div>
+  </header>
+
+  <div class="container">
+    <div class="family-groups" id="familyGroups"></div>
+    <div class="menu-items" id="menuItems"></div>
+  </div>
+</div>
+
+<script>
+/* === KULLANICI AYARLARI === */
+const sheetId = '11GwrY_qvxWFo8qEXoZO9MywSZwJtMgJ-wLY9ommGC0E';
+const restaurants = [
+  { name: 'Kahve Aşkına', sheet: 'KahveAskina' },
+  { name: 'Bolçi',        sheet: 'Bolci'       },
+];
+// Logonun herkese açık linkini buraya koy (Drive/Imgur vs.)
+// Örn Drive paylaşım: https://drive.google.com/file/d/FILE_ID/view?usp=sharing
+const logoUrl = 'https://via.placeholder.com/300x80?text=LOGO';
+
+/* === İKONLAR === */
+const majorIcons = { "Yiyecek":"🍽️", "İçecek":"🥤", "Alkollü İçecek":"🍷" };
+
+/* === YARDIMCI FONKSİYONLAR === */
+function normalizeDriveUrl(raw){
+  if(!raw) return "";
+  const url = String(raw).trim();
+  // Drive: /file/d/ID/view
+  let m = url.match(/\/file\/d\/([^/]+)\/view/i);
+  if (m) return `https://drive.google.com/uc?export=view&id=${m[1]}`;
+  // Drive: ?id=ID
+  m = url.match(/[?&]id=([^&]+)/i);
+  if (m && /drive\.google\.com/i.test(url)) return `https://drive.google.com/uc?export=view&id=${m[1]}`;
+  // Drive: uc?export=download&id=ID
+  m = url.match(/uc\?export=download&id=([^&]+)/i);
+  if (m) return `https://drive.google.com/uc?export=view&id=${m[1]}`;
+  // Alternatif hostlar
+  if (/dropbox\.com/i.test(url)) return url.replace("?dl=0", "?raw=1");
+  return url;
+}
+function safeText(v){ return (v===undefined || v===null) ? "" : String(v); }
+
+/* === DURUM === */
+let currentRestaurant = null;
+let currentMajor = null;
+
+/* === NAV === */
+function goHome(){
+  currentRestaurant = null;
+  document.getElementById('menu-screen').style.display = 'none';
+  document.getElementById('start-screen').style.display = 'flex';
+}
+
+/* === BAŞLANGIÇ === */
+(function init(){
+  // Restoran butonları
+  const wrap = document.getElementById('restaurantButtons');
+  restaurants.forEach(r=>{
+    const b = document.createElement('button');
+    b.textContent = r.name;
+    b.onclick = () => selectRestaurant(r);
+    wrap.appendChild(b);
+  });
+
+  // Logo set et (normalize + fallback + no-referrer)
+  const lg = document.getElementById('logoImg');
+  const nUrl = normalizeDriveUrl(logoUrl);
+  lg.src = nUrl || 'https://via.placeholder.com/300x80?text=LOGO';
+  lg.onerror = function(){ this.src = 'https://via.placeholder.com/300x80?text=LOGO'; };
+  lg.onclick = goHome;
+})();
+
+/* === RESTORAN YÜKLE === */
+async function selectRestaurant(r){
+  currentRestaurant = r;
+  document.getElementById('start-screen').style.display = 'none';
+  document.getElementById('menu-screen').style.display = 'block';
+
+  const endpoint = `https://opensheet.elk.sh/${sheetId}/${encodeURIComponent(r.sheet)}`;
+  const data = await fetch(endpoint).then(res=>res.json());
+  currentRestaurant.data = Array.isArray(data) ? data : [];
+
+  loadMajorGroups();
+}
+
+/* === MAJOR === */
+function loadMajorGroups(){
+  const majors = [...new Set(currentRestaurant.data.map(it => it['Major Grup']))].filter(Boolean);
+  const box = document.getElementById('majorGroups');
+  box.innerHTML = '';
+
+  majors.forEach((m, i)=>{
+    const btn = document.createElement('button');
+    const icon = majorIcons[m] || "📌";
+    btn.innerHTML = `<span>${icon}</span><span>${m}</span>`;
+    btn.onclick = () => selectMajor(m);
+    if(i===0){ btn.classList.add('active'); currentMajor = m; }
+    box.appendChild(btn);
+  });
+
+  if(majors.length){ selectMajor(currentMajor); }
+  else{
+    document.getElementById('familyGroups').innerHTML = '';
+    document.getElementById('menuItems').innerHTML = '<p style="padding:12px;color:#666">Bu restoran için veri bulunamadı.</p>';
+  }
+}
+
+function selectMajor(majorName){
+  currentMajor = majorName;
+  document.querySelectorAll('.major-groups button').forEach(b=>{
+    b.classList.toggle('active', b.textContent.includes(majorName));
+  });
+  loadFamilyGroups();
+}
+
+/* === FAMILY === */
+function loadFamilyGroups(){
+  const fams = [...new Set(
+    currentRestaurant.data
+      .filter(it => it['Major Grup']===currentMajor)
+      .map(it => it['Family Grup'])
+  )].filter(Boolean);
+
+  const famBox = document.getElementById('familyGroups');
+  famBox.innerHTML = '';
+
+  fams.forEach((f,i)=>{
+    const btn = document.createElement('button');
+    btn.textContent = f;
+    btn.onclick = () => selectFamily(f);
+    if(i===0){ btn.classList.add('active'); selectFamily(f); }
+    famBox.appendChild(btn);
+  });
+
+  if(!fams.length){
+    document.getElementById('menuItems').innerHTML = '<p style="padding:12px;color:#666">Bu major grup için family bulunamadı.</p>';
+  }
+}
+
+/* === ÜRÜNLER === */
+function selectFamily(famName){
+  document.querySelectorAll('.family-groups button')
+    .forEach(b => b.classList.toggle('active', b.textContent === famName));
+
+  const items = currentRestaurant.data.filter(
+    it => it['Major Grup']===currentMajor && it['Family Grup']===famName
+  );
+
+  const list = document.getElementById('menuItems');
+  list.innerHTML = '';
+
+  items.forEach(it=>{
+    const imgUrl = normalizeDriveUrl(it['Görsel URL']) || `https://drive.google.com/thumbnail?id=${(safeText(it['Görsel URL']).match(/[?&]id=([^&]+)/)||[])[1]||''}&sz=w160`;
+    const name  = safeText(it['Ürün Adı']);
+    const price = safeText(it['Fiyat']);
+    const desc  = safeText(it['Açıklama']);
+
+    const card = document.createElement('div');
+    card.className = 'menu-card';
+    card.innerHTML = `
+      <img src="${imgUrl || 'https://via.placeholder.com/80'}"
+           alt="${name}"
+           referrerpolicy="no-referrer"
+           onerror="this.src='https://via.placeholder.com/80';">
+      <div class="menu-info">
+        <h4>${name}<span class="price">${price ? price + '₺' : ''}</span></h4>
+        <p>${desc}</p>
+      </div>
+    `;
+    list.appendChild(card);
+  });
+
+  if(!items.length){
+    list.innerHTML = '<p style="padding:12px;color:#666">Bu family grubunda ürün yok.</p>';
+  }
+}
+</script>
+</body>
+</html>
