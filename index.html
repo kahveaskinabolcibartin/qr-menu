@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>QR Menü</title>
+<style>
+  :root{ --r:12px; --border:#e6e6e6; --muted:#666; }
+  body{ font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; margin:0; background:#fafafa; color:#111; }
+
+  /* Sticky üst alan (logo + major) */
+  header{ position:sticky; top:0; z-index:1000; background:#fff; border-bottom:1px solid var(--border); display:flex; flex-direction:column; align-items:center; }
+  .logo-wrap{ padding:14px 12px 6px; }
+  .logo-wrap img{ height:140px; max-width:92vw; object-fit:contain; cursor:pointer; display:block; margin:0 auto; }
+
+  .major-groups{ display:flex; gap:10px; flex-wrap:wrap; justify-content:center; padding:8px 10px 12px; }
+  .major-groups button{
+    padding:12px 20px; border:none; border-radius:var(--r); background:#efefef; cursor:pointer;
+    font-size:18px; display:flex; align-items:center; gap:10px; box-shadow:0 1px 0 rgba(0,0,0,.05) inset;
+  }
+  .major-groups button.active{ background:#111; color:#fff; }
+
+  /* Arama + family hızlı geçiş çubuğu */
+  .toolbar{ width:100%; background:#fff; border-bottom:1px solid var(--border); }
+  .toolbar-inner{ max-width:1100px; margin:0 auto; padding:10px 12px; display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .search{ flex:1 1 260px; display:flex; }
+  .search input{
+    width:100%; padding:12px 14px; border:1px solid var(--border); border-radius:10px; font-size:15px; outline:none;
+  }
+  .chips{ display:flex; gap:8px; overflow:auto; padding-bottom:2px; }
+  .chip{
+    padding:8px 12px; border:1px solid var(--border); background:#fff; border-radius:999px; cursor:pointer; font-size:14px; white-space:nowrap;
+  }
+  .chip.active{ background:#111; color:#fff; border-color:#111; }
+
+  /* Giriş ekranı */
+  .rest-select{ display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; gap:20px; padding:24px; }
+  .rest-buttons{ display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:12px; width:100%; max-width:720px; }
+  .rest-card{
+    display:flex; flex-direction:column; align-items:center; gap:10px; background:#fff; border:1px solid var(--border);
+    border-radius:var(--r); padding:16px 12px; cursor:pointer; transition:transform .06s ease, box-shadow .06s ease;
+  }
+  .rest-card:hover{ transform:translateY(-1px); box-shadow:0 2px 12px rgba(0,0,0,.06); }
+  .rest-card img{ height:70px; width:auto; object-fit:contain; }
+  .rest-card span{ font-size:18px; font-weight:600; color:#111; }
+
+  /* İçerik alanı */
+  .container{ display:flex; gap:0; min-height:calc(100vh - 190px); }
+  .menu-items{ flex:1; padding:14px; max-width:1100px; margin:0 auto; }
+
+  /* Başlıklar (içerik) */
+  .maj-header{
+    margin:28px 0 12px; font-size:20px; font-weight:800; color:#222;
+  }
+  .fam-header{
+    margin:22px 0 10px; font-size:18px; font-weight:700; color:#333; padding-top:6px; border-top:1px dashed #ddd;
+  }
+
+  /* Koyu arka plan + Major "Tümü" görünümünde başlıkları beyaz yap */
+  body.dark-bg.all-major .maj-header{ color:#fff; }
+  body.dark-bg.all-major .fam-header{ color:#fff; }
+  /* Koyu arka plan + Seçili major içinde Family "Tümü" görünümünde family başlıklarını beyaz yap */
+  body.dark-bg.family-all .fam-header{ color:#fff; }
+
+  .menu-card{
+    display:flex; gap:12px; background:#fff; border-radius:var(--r); border:1px solid var(--border); margin-bottom:12px; padding:10px; align-items:center;
+  }
+  .menu-card img{ width:96px; height:96px; object-fit:cover; border-radius:10px; background:#f3f3f3; flex:0 0 auto; }
+  .menu-info{ flex:1; min-width:0; }
+  .menu-info h4{ margin:0; font-size:16.5px; display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .menu-info h4 .price{ white-space:nowrap; font-weight:700; }
+  .menu-info p{ margin:6px 0 0; font-size:13.5px; color:var(--muted); line-height:1.38; }
+
+  @media (max-width: 860px){
+    .rest-buttons{ grid-template-columns:1fr; max-width:420px; }
+    .menu-card img{ width:88px; height:88px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Giriş ekranı -->
+<div id="start-screen" class="rest-select">
+  <h2>Restoran Seçiniz</h2>
+  <div id="restaurantButtons" class="rest-buttons"></div>
+</div>
+
+<!-- Menü ekranı -->
+<div id="menu-screen" style="display:none;">
+  <header>
+    <div class="logo-wrap">
+      <img id="logoImg" alt="Logo" referrerpolicy="no-referrer"/>
+    </div>
+    <div class="major-groups" id="majorGroups"></div>
+  </header>
+
+  <!-- Arama + Family chips -->
+  <div class="toolbar">
+    <div class="toolbar-inner">
+      <div class="search">
+        <input id="searchInput" type="search" placeholder="Bu kategoride ara (örn. latte, çay)"/>
+      </div>
+      <div id="familyChips" class="chips"></div>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="menu-items" id="menuItems"></div>
+  </div>
+</div>
+
+<script>
+/* ==== AYARLAR ==== */
+const sheetId = '11GwrY_qvxWFo8qEXoZO9MywSZwJtMgJ-wLY9ommGC0E';
+const restaurants = [
+  {
+    name : 'Kahve Aşkına',
+    sheet: 'KahveAskina',
+    logo : 'https://drive.google.com/file/d/18xVETn9rQBjlyzCmoxaHQmuPL2BEUSNr/view?usp=drive_link',
+    cardLogo: 'https://drive.google.com/file/d/18xVETn9rQBjlyzCmoxaHQmuPL2BEUSNr/view?usp=drive_link',
+    bgColor: '#013220' // Koyu çam yeşili
+  },
+  {
+    name : 'Bolçi',
+    sheet: 'Bolci',
+    logo : 'https://drive.google.com/file/d/1nXVpu8R0Tvf5W8FkcM0H1JAjpFNAIWHA/view?usp=drive_link',
+    cardLogo: 'https://drive.google.com/file/d/1nXVpu8R0Tvf5W8FkcM0H1JAjpFNAIWHA/view?usp=drive_link',
+    bgColor: '#4B3621' // Acı kahve
+  }
+];
+const majorIcons = { "Yiyecek":"🍽️", "İçecek":"🥤", "Alkollü İçecek":"🍷" };
+const ALL_MAJOR = '__ALL__'; // "Major'da Tümü" için sabit
+
+/* ==== Yardımcılar ==== */
+function driveFileId(raw){
+  if(!raw) return "";
+  const url = String(raw).trim();
+  let m = url.match(/\/file\/d\/([^/]+)\/view/i);
+  if (m) return m[1];
+  m = url.match(/[?&]id=([^&]+)/i);
+  if (m) return m[1];
+  m = url.match(/uc\?export=(?:view|download)&id=([^&]+)/i);
+  if (m) return m[1];
+  return "";
+}
+function imageUrlFromCell(raw, size=160){
+  const id = driveFileId(raw);
+  if (id) return `https://drive.google.com/thumbnail?id=${id}&sz=w${size}`; // stabil thumbnail
+  if (/dropbox\.com/i.test(raw||"")) return String(raw).replace("?dl=0","?raw=1");
+  return (raw||"").trim();
+}
+function safeText(v){ return (v===undefined || v===null) ? "" : String(v); }
+function formatPrice(v){
+  if(v===undefined || v===null || v==="") return "";
+  const num = Number(String(v).replace(/[^\d.,-]/g,"").replace(",","."));
+  if (isNaN(num)) return safeText(v); // metin ise bozma
+  try {
+    return new Intl.NumberFormat('tr-TR', { style:'currency', currency:'TRY', maximumFractionDigits:0 }).format(num);
+  } catch(e){ return num + " ₺"; }
+}
+function debounce(fn, ms=250){
+  let t; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), ms); };
+}
+// heks renk koyu mu? (yaklaşık parlaklık)
+function isDark(hex){
+  const h = hex.replace('#','');
+  const bigint = parseInt(h.length===3 ? h.split('').map(c=>c+c).join('') : h, 16);
+  const r = (bigint >> 16) & 255, g = (bigint >> 8) & 255, b = bigint & 255;
+  const luminance = (0.299*r + 0.587*g + 0.114*b);
+  return luminance < 140;
+}
+
+/* ==== Durum ==== */
+let currentRestaurant = null;
+let currentMajor = null;
+let currentFamily = null;
+let currentSearch = "";
+
+/* ==== Body mod sınıflarını yönet ==== */
+function updateBodyModeClasses(){
+  // Major "Tümü" modunda: tüm major+family
+  document.body.classList.toggle('all-major', currentMajor === ALL_MAJOR);
+  // Seçili major içinde Family "Tümü" modunda: currentFamily yok
+  const inFamilyAll = (currentMajor !== ALL_MAJOR) && !currentFamily;
+  document.body.classList.toggle('family-all', inFamilyAll);
+}
+
+/* ==== NAV ==== */
+function goHome(){
+  currentRestaurant = null;
+  document.getElementById('menu-screen').style.display = 'none';
+  document.getElementById('start-screen').style.display = 'flex';
+  document.body.style.background = '#fafafa';
+  document.body.classList.remove('dark-bg','all-major','family-all');
+}
+
+/* ==== Giriş ekranı (kartlar: logo + isim) ==== */
+(function initStart(){
+  const wrap = document.getElementById('restaurantButtons');
+  restaurants.forEach(r=>{
+    const card = document.createElement('button');
+    card.className = 'rest-card';
+    card.onclick = () => selectRestaurant(r);
+
+    const img = document.createElement('img');
+    img.src = imageUrlFromCell(r.cardLogo, 320) || 'https://via.placeholder.com/320x100?text=LOGO';
+    img.loading = 'lazy'; img.decoding = 'async';
+    img.onerror = function(){ this.onerror=null; this.src='https://via.placeholder.com/320x100?text=LOGO'; };
+
+    const title = document.createElement('span');
+    title.textContent = r.name;
+
+    card.appendChild(img);
+    card.appendChild(title);
+    wrap.appendChild(card);
+  });
+})();
+
+/* ==== Restoran seçildiğinde ==== */
+async function selectRestaurant(r){
+  currentRestaurant = r;
+  currentMajor = null;
+  currentFamily = null;
+  currentSearch = "";
+
+  // Arka planı restorana göre ayarla
+  document.body.style.background = r.bgColor || '#fafafa';
+  if (r.bgColor && isDark(r.bgColor)) document.body.classList.add('dark-bg');
+  else document.body.classList.remove('dark-bg');
+
+  updateBodyModeClasses();
+
+  document.getElementById('start-screen').style.display = 'none';
+  document.getElementById('menu-screen').style.display = 'block';
+
+  // Üst logo
+  const lg = document.getElementById('logoImg');
+  lg.src = imageUrlFromCell(r.logo, 480) || 'https://via.placeholder.com/600x160?text=LOGO';
+  lg.loading = 'lazy'; lg.decoding = 'async';
+  lg.onerror = function(){ this.onerror=null; this.src='https://via.placeholder.com/600x160?text=LOGO'; };
+  lg.onclick = goHome;
+
+  // Veriyi çek
+  const endpoint = `https://opensheet.elk.sh/${sheetId}/${encodeURIComponent(r.sheet)}`;
+  const data = await fetch(endpoint).then(res=>res.json());
+  currentRestaurant.data = Array.isArray(data) ? data : [];
+
+  // Majorları çiz
+  loadMajorGroups();
+}
+
+/* ==== Major ==== */
+function loadMajorGroups(){
+  const majors = [...new Set(currentRestaurant.data.map(it => it['Major Grup']))].filter(Boolean);
+  const box = document.getElementById('majorGroups');
+  box.innerHTML = '';
+
+  // --- Tümü (major) butonu ---
+  const allBtn = document.createElement('button');
+  allBtn.innerHTML = `<span>📋</span><span>Tümü</span>`;
+  allBtn.onclick = () => selectMajor(ALL_MAJOR);
+  box.appendChild(allBtn);
+
+  // --- Diğer major butonları ---
+  majors.forEach((m, i)=>{
+    const btn = document.createElement('button');
+    const icon = majorIcons[m] || "📌";
+    btn.innerHTML = `<span>${icon}</span><span>${m}</span>`;
+    btn.onclick = () => selectMajor(m);
+    box.appendChild(btn);
+    if(i===0 && currentMajor==null){ currentMajor = m; } // ilk açılış
+  });
+
+  // Varsayılan: önce mevcut currentMajor, yoksa ALL_MAJOR
+  selectMajor(currentMajor || ALL_MAJOR);
+}
+
+function selectMajor(m){
+  currentMajor = m;
+  currentFamily = null;          // major değiştiyse family sıfırlansın
+  currentSearch = "";
+  document.getElementById('searchInput').value = "";
+
+  // Major highlight
+  document.querySelectorAll('.major-groups button').forEach(b=>{
+    const txt = b.innerText || b.textContent;
+    const isAll = (m === ALL_MAJOR && txt.includes('Tümü'));
+    const isThis = (m !== ALL_MAJOR && txt.includes(m));
+    b.classList.toggle('active', isAll || isThis);
+  });
+
+  updateBodyModeClasses();
+
+  renderFamilyChips();
+  renderItems();
+}
+
+/* ==== Family chips ==== */
+function renderFamilyChips(){
+  const chips = document.getElementById('familyChips');
+  chips.innerHTML = '';
+
+  // Major Tümü modunda family çipleri devre dışı, tek "Tümü" çipi
+  if(currentMajor === ALL_MAJOR){
+    const only = document.createElement('div');
+    only.className = 'chip active';
+    only.textContent = 'Tümü';
+    chips.appendChild(only);
+    return;
+  }
+
+  const fams = [...new Set(
+    currentRestaurant.data
+      .filter(it => it['Major Grup']===currentMajor)
+      .map(it => it['Family Grup'])
+  )].filter(Boolean);
+
+  // "Tümü" chip'i
+  const all = document.createElement('div');
+  all.className = 'chip' + (currentFamily ? '' : ' active');
+  all.textContent = 'Tümü';
+  all.onclick = ()=>{ currentFamily = null; updateBodyModeClasses(); highlightChips(); renderItems(); };
+  chips.appendChild(all);
+
+  fams.forEach(f=>{
+    const c = document.createElement('div');
+    c.className = 'chip' + (currentFamily===f ? ' active' : '');
+    c.textContent = f;
+    c.onclick = ()=>{ currentFamily = f; updateBodyModeClasses(); highlightChips(); renderItems(); };
+    chips.appendChild(c);
+  });
+}
+function highlightChips(){
+  const chips = document.querySelectorAll('#familyChips .chip');
+  chips.forEach(ch=>{
+    if(ch.textContent==='Tümü') ch.classList.toggle('active', !currentFamily);
+    else ch.classList.toggle('active', currentFamily===ch.textContent);
+  });
+}
+
+/* ==== Arama ==== */
+const onSearch = debounce(v=>{ currentSearch = v.trim().toLowerCase(); renderItems(); }, 200);
+document.getElementById('searchInput').addEventListener('input', e=> onSearch(e.target.value));
+
+/* ==== Ürünler ==== */
+function renderItems(){
+  updateBodyModeClasses();
+
+  const list = document.getElementById('menuItems');
+  list.innerHTML = '';
+
+  // Başlangıç: ALL_MAJOR ise tüm veriler, değilse seçili major
+  let items = (currentMajor === ALL_MAJOR)
+    ? [...currentRestaurant.data]
+    : currentRestaurant.data.filter(it => it['Major Grup']===currentMajor);
+
+  // Family seçiliyse sadece o family
+  if(currentFamily) items = items.filter(it => it['Family Grup']===currentFamily);
+
+  // Arama
+  if(currentSearch){
+    const q = currentSearch;
+    items = items.filter(it=>{
+      const name = (it['Ürün Adı']||'').toString().toLowerCase();
+      const desc = (it['Açıklama']||'').toString().toLowerCase();
+      return name.includes(q) || desc.includes(q);
+    });
+  }
+
+  if(!items.length){
+    list.innerHTML = '<p style="padding:12px; color:#666">Bu kriterlerde ürün bulunamadı.</p>';
+    return;
+  }
+
+  // --- ALL_MAJOR: Major → Family → Ürünler hiyerarşisi ---
+  if(currentMajor === ALL_MAJOR){
+    // Özel sıralama: Yiyecek → İçecek → Alkollü İçecek → (diğerleri alfabetik)
+    const weight = (name)=>{
+      if(name === 'Yiyecek') return 0;
+      if(name === 'İçecek') return 1;
+      if(name === 'Alkollü İçecek') return 2;
+      return 99;
+    };
+    const majorOrder = (a,b)=>{
+      const wa = weight(a), wb = weight(b);
+      if(wa !== wb) return wa - wb;
+      return String(a).localeCompare(String(b),'tr',{sensitivity:'base'});
+    };
+
+    const majors = [...new Set(items.map(it => it['Major Grup']))].filter(Boolean).sort(majorOrder);
+
+    majors.forEach(maj=>{
+      const hMaj = document.createElement('div');
+      hMaj.className = 'maj-header';
+      hMaj.textContent = maj;
+      list.appendChild(hMaj);
+
+      const famItemsAll = items.filter(it => it['Major Grup']===maj);
+      const families = [...new Set(famItemsAll.map(it => it['Family Grup']))]
+                        .filter(Boolean)
+                        .sort((a,b)=> String(a).localeCompare(String(b),'tr',{sensitivity:'base'}));
+
+      families.forEach(fam=>{
+        const famItems = famItemsAll.filter(it => it['Family Grup']===fam);
+        if(!famItems.length) return;
+
+        const hFam = document.createElement('div');
+        hFam.className = 'fam-header';
+        hFam.textContent = fam;
+        list.appendChild(hFam);
+
+        famItems.forEach(it=> list.appendChild(menuCard(it)));
+      });
+    });
+    return;
+  }
+
+  // --- Normal mod: seçili major, isteğe göre family (veya Tümü/arama) ---
+  if(!currentFamily){
+    const families = [...new Set(items.map(it => it['Family Grup']))].filter(Boolean)
+      .sort((a,b)=> String(a).localeCompare(String(b),'tr',{sensitivity:'base'}));
+
+    families.forEach(fam=>{
+      const famItems = items.filter(it => it['Family Grup']===fam);
+      if(!famItems.length) return;
+
+      const h = document.createElement('div');
+      h.className = 'fam-header';
+      h.textContent = fam;
+      list.appendChild(h);
+
+      famItems.forEach(it=> list.appendChild(menuCard(it)));
+    });
+  } else {
+    items.forEach(it=> list.appendChild(menuCard(it)));
+  }
+}
+
+function menuCard(it){
+  const name = safeText(it['Ürün Adı']);
+  const desc = safeText(it['Açıklama']);
+  const price = formatPrice(it['Fiyat']);
+  const src = imageUrlFromCell(it['Görsel URL'], 320) || 'https://via.placeholder.com/96';
+  const card = document.createElement('div');
+  card.className = 'menu-card';
+  card.innerHTML = `
+    <img src="${src}" alt="${name}" loading="lazy" decoding="async"
+         referrerpolicy="no-referrer"
+         onerror="this.onerror=null; this.src='https://via.placeholder.com/96';">
+    <div class="menu-info">
+      <h4>${name}<span class="price">${price}</span></h4>
+      <p>${desc}</p>
+    </div>
+  `;
+  return card;
+}
+
+/* ==== URL parametreleri ile derin bağlantı (r, m, f) ==== */
+window.addEventListener('DOMContentLoaded', async () => {
+  const p = new URLSearchParams(location.search);
+  const r = p.get('r');         // restoran sheet adı veya görünen adı: KahveAskina / Bolci / ALL
+  const m = p.get('m');         // Major Grup adı (örn. "Yiyecek", "İçecek")
+  const f = p.get('f');         // Family Grup adı (örn. "Kahvaltı")
+
+  if (!r) return; // parametre yoksa normal giriş ekranı
+
+  if (r === 'ALL') {
+    const first = restaurants[0];
+    await selectRestaurant(first);
+    selectMajor(ALL_MAJOR);
+    return;
+  }
+
+  const target = restaurants.find(x => x.sheet === r || x.name === r);
+  if (!target) return;
+
+  await selectRestaurant(target);
+
+  if (m) {
+    if (m.toUpperCase() === 'TÜMÜ') {
+      selectMajor(ALL_MAJOR);
+    } else {
+      selectMajor(m);
+      if (f) {
+        // family chipleri çizilsin diye ufak gecikme
+        setTimeout(() => {
+          currentFamily = f;
+          renderFamilyChips();
+          renderItems();
+        }, 50);
+      }
+    }
+  }
+});
+</script>
+</body>
+</html>
